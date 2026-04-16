@@ -6,6 +6,8 @@ import {PlayerState} from "./playerState"
 import {GameEngine} from "../game/gameEngine"
 import {ChatReceivePayload} from "../../types/ws/chat"
 import { logger, LogCategory } from "../../utils/logger"
+import {UserInfo} from "../../types/ws/user";
+import {sendSystemMessage} from "../../ws/handlers/chat";
 
 export class Room {
     roomId: string
@@ -119,6 +121,9 @@ export class RoomManager {
         room.addPlayer(ctx)
         logger.room("Player joined room", { roomId, userId: ctx.userId, playerCount: room.players.size })
 
+        const nickname = ctx.user?.nickname ?? ctx.userId
+        sendSystemMessage(room, `${nickname} 加入了房间`)
+
         room.broadcast("room.update", {
             room: room.toRoomInfo(),
         })
@@ -127,7 +132,7 @@ export class RoomManager {
     }
 
     // 断线重连：将新的ctx关联到现有玩家
-    rejoinRoom(ctx: WsContext, roomId: string, user: { userId: string; nickname: string; avatar: string; background?: string }) {
+    rejoinRoom(ctx: WsContext, roomId: string, user: UserInfo) {
         const room = this.rooms.get(roomId)
         if (!room) throw new Error("ROOM_NOT_FOUND")
 
@@ -141,10 +146,16 @@ export class RoomManager {
 
         // 更新用户信息（允许用户信息在断线期间更新）
         ctx.user = {
+            userId: user.userId,
             nickname: user.nickname,
             avatar: user.avatar,
             background: user.background,
+            color: user.color,
         }
+
+        // 重置ping/pong状态，避免立即被判定为离线
+        ctx.lastPongTime = Date.now()
+        ctx.latency = undefined
 
         logger.room("Player reconnected", { roomId, userId: user.userId, gameStatus: room.game ? "playing" : "waiting" })
 
@@ -162,10 +173,14 @@ export class RoomManager {
         const room = this.rooms.get(ctx.roomId)
         if (!room) return
 
+        const nickname = ctx.user?.nickname ?? ctx.userId
+
         room.removePlayer(ctx.userId)
         ctx.roomId = undefined
 
         logger.room("Player left room", { roomId: room.roomId, userId: ctx.userId, playerCount: room.players.size })
+
+        sendSystemMessage(room, `${nickname} 退出了房间`)
 
         if (room.players.size === 0) {
             this.rooms.delete(room.roomId)

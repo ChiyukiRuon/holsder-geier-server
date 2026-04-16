@@ -3,7 +3,6 @@ import {WsContext} from "../../ws/wsContext";
 export class PlayerState {
     ctx: WsContext
 
-    // 房间状态
     ready = false
 
     // 游戏状态
@@ -24,24 +23,20 @@ export class PlayerState {
 
     toPublicInfo() {
         return {
-            userId: this.userId,
-            nickname: this.ctx.user?.nickname ?? "Unknown",
-            avatar: this.ctx.user?.avatar ?? "",
-
-            ready: this.ready,
-
-            card: {
-                count: this.handCards.length,
-                list: [],
-                background: null,
+            user: {
+                userId: this.userId,
+                nickname: this.ctx.user?.nickname ?? "Unknown",
+                avatar: this.ctx.user?.avatar ?? "",
+                background: this.ctx.user?.background ?? "",
+                color: this.ctx.user?.color ?? "",
             },
-
+            ready: this.ready,
+            card: [],
             point: {
                 count: this.points.length,
                 list: this.points,
             },
-
-            latency: this.ctx.latency,
+            latency: this.ctx.ws.readyState === 1 ? (this.ctx.latency ?? -999) : -999,
         }
     }
 

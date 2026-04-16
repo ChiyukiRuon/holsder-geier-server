@@ -1,15 +1,12 @@
 import { WebSocket } from "ws"
+import {UserInfo} from "../types/ws/user";
 
 export interface WsContext {
     ws: WebSocket
     userId?: string
     roomId?: string
 
-    user?: {
-        nickname: string
-        avatar: string
-        background?: string
-    }
+    user?: UserInfo
 
     ready?: boolean
 

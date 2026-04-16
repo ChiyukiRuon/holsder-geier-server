@@ -22,10 +22,13 @@ const createKookClient = (token?: string) => {
 
 const handleKookResponse = (response: AxiosResponse) => {
     const isOAuthToken = response.config.url === '/oauth2/token' && response.data?.access_token;
-    if (response.data?.code === 0 || isOAuthToken) {
+    if (isOAuthToken) {
         return response;
+    } else if (response.data.code !== 0) {
+        return Promise.reject(response.data.message);
+    } else {
+        return response.data;
     }
-    throw response.data;
 };
 
 interface RequestOptions {

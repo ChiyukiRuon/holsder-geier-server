@@ -28,7 +28,7 @@ export function handleWsConnection(ws: WebSocket) {
         }
 
         // 处理 pong 消息，计算延迟
-        if (msg.type === "server.pong") {
+        if (msg.type === "client.pong") {
             const payload = msg.payload as { clientTime?: number; serverTime?: number }
             if (payload.clientTime !== undefined) {
                 const now = Date.now()

@@ -21,9 +21,11 @@ export const roomHandlers: HandlerMap = {
         if (user) {
             ctx.userId = user.userId
             ctx.user = {
+                userId: user.userId,
                 nickname: user.nickname,
-                avatar: user.avatar,
+                avatar: user.avatar ?? "",
                 background: user.background,
+                color: user.color,
             }
         }
 
@@ -53,12 +55,30 @@ export const roomHandlers: HandlerMap = {
             return
         }
 
-        const room = roomManager.getRoom(roomId)
+        let room = roomManager.getRoom(roomId)
+
+        // 如果房间不存在，自动创建房间
         if (!room) {
-            send(ctx, "server.error", {
-                code: RoomError.ROOM_NOT_FOUND,
-                message: "Room not found",
-                requestId: msg.requestId,
+            ctx.userId = user.userId
+            ctx.user = {
+                userId: user.userId,
+                nickname: user.nickname,
+                avatar: user.avatar ?? "",
+                background: user.background,
+                color: user.color,
+            }
+
+            room = roomManager.createRoom(roomId, 5)
+            room.addPlayer(ctx)
+
+            logger.room("Room auto-created and player joined", { roomId, userId: user.userId })
+
+            send(ctx, "room.update", {
+                room: room.toRoomInfo(),
+            })
+
+            send(ctx, "server.ack", {
+                requestId: msg.requestId!,
             })
             return
         }
@@ -77,10 +97,7 @@ export const roomHandlers: HandlerMap = {
                 // 如果游戏正在进行，发送游戏状态
                 if (room.game) {
                     send(ctx, "game.stage", {
-                        stage: room.game.phase,
-                        round: room.game.currentRound,
-                        scoreCard: room.game.currentScoreCard,
-                        carriedOver: room.game.carriedOverCards,
+                        players: Array.from(room.players.values()).map((p) => p.toPublicInfo()),
                         state: room.game.getState(),
                     })
                 }
@@ -102,9 +119,11 @@ export const roomHandlers: HandlerMap = {
         // 正常加入：设置用户信息
         ctx.userId = user.userId
         ctx.user = {
+            userId: user.userId,
             nickname: user.nickname,
             avatar: user.avatar,
             background: user.background,
+            color: user.color,
         }
 
         roomManager.joinRoom(ctx, roomId)

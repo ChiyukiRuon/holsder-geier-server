@@ -5,27 +5,32 @@ import { logger, LogCategory } from "../../utils/logger"
 
 export const userHandlers: HandlerMap = {
     "user.update": async (ctx, msg) => {
-        const { nickname, avatar, background } = msg.payload
+        const { nickname, avatar, background, color } = msg.payload
+
+        if (!ctx.user) {
+            ctx.user = {
+                userId: ctx.userId || '',
+                nickname: '',
+                avatar: '',
+                background: '',
+                color: '',
+            }
+        }
 
         if (nickname !== undefined) {
-            if (!ctx.user) {
-                ctx.user = { nickname: '', avatar: '' }
-            }
             ctx.user.nickname = nickname
         }
 
         if (avatar !== undefined) {
-            if (!ctx.user) {
-                ctx.user = { nickname: '', avatar: '' }
-            }
             ctx.user.avatar = avatar
         }
 
         if (background !== undefined) {
-            if (!ctx.user) {
-                ctx.user = { nickname: '', avatar: '' }
-            }
             ctx.user.background = background
+        }
+
+        if (color !== undefined) {
+            ctx.user.color = color
         }
 
         // 如果在房间里,广播用户信息更新

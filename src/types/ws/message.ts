@@ -31,7 +31,7 @@ export interface MessageMap {
 
     // server
     "server.ping": Server.PingPayload
-    "server.pong": Server.PongPayload
+    "client.pong": Server.PongPayload
     "server.ack": Server.AckPayload
     "server.error": Server.ErrorPayload
     "server.info": Server.InfoPayload

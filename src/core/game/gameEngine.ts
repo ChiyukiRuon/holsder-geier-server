@@ -2,6 +2,7 @@ import { Room } from "../room/roomManager"
 import { PlayerState } from "../room/playerState"
 import { MessageMap } from "../../types/ws/message"
 import { logger, LogCategory } from "../../utils/logger"
+import {sendSystemMessage} from "../../ws/handlers/chat";
 
 export type GamePhase =
     | "idle"           // 未开始
@@ -89,12 +90,10 @@ export class GameEngine {
         this.dealHands()
         this.shuffleScoreDeck()
 
-        // 服务器下发游戏开始信号
+        sendSystemMessage(this.room, "游戏开始！")
+
         this.room.broadcast("game.start", {
-            players: this.players.map((p) => ({
-                playerId: p.userId,
-                name: p.ctx.user?.nickname ?? "Unknown",
-            })),
+            players: this.players.map((p) => p.toPublicInfo()),
             state: this.getState(),
         })
 
@@ -156,10 +155,7 @@ export class GameEngine {
 
         // 服务器下发游戏阶段信息
         this.room.broadcast("game.stage", {
-            stage: "reveal",
-            round: this.currentRound,
-            scoreCard: this.currentScoreCard,
-            carriedOver: this.carriedOverCards,
+            players: this.players.map((p) => p.toPublicInfo()),
             state: this.getState(),
         })
 
@@ -173,10 +169,7 @@ export class GameEngine {
         setTimeout(() => {
             this.phase = "play"
             this.room.broadcast("game.stage", {
-                stage: "play",
-                round: this.currentRound,
-                scoreCard: this.currentScoreCard,
-                carriedOver: this.carriedOverCards,
+                players: this.players.map((p) => p.toPublicInfo()),
                 state: this.getState(),
             })
         }, 100)
@@ -218,12 +211,9 @@ export class GameEngine {
         // 服务器向其余玩家同步某一玩家的游戏操作
         this.room.broadcastToOthers(playerId, "game.sync", {
             action: {
-                playerId,
-                actionId: action.actionId,
-                actionType: action.actionType,
+                player: player.toPublicInfo(),
                 card,
             },
-            state: this.getState(),
         })
 
         if (this.playedCards.size === this.players.length) {
@@ -295,16 +285,7 @@ export class GameEngine {
         })
 
         this.room.broadcast("game.resolve", {
-            round: this.currentRound,
-            playedCards,
-            winnerId,
-            scoreCard: this.currentScoreCard,
-            carriedOver: this.carriedOverCards,
-            playerPoints: this.players.map((p) => ({
-                playerId: p.userId,
-                points: p.points,
-                total: p.getTotalScore(),
-            })),
+            players: this.players.map((p) => p.toPublicInfo()),
             state: this.getState(),
         })
 
@@ -359,6 +340,8 @@ export class GameEngine {
             .sort((a, b) => b.total - a.total)
 
         const winnerId = rankings[0]?.playerId
+        const winner = this.players.find(p => p.userId === winnerId)
+        const winnerName = winner?.ctx.user?.nickname ?? winnerId ?? "未知玩家"
 
         logger.game("Game ended", {
             roomId: this.room.roomId,
@@ -369,7 +352,8 @@ export class GameEngine {
 
         this.room.status = "waiting"
 
-        // 服务器下发游戏结束信号，并携带游戏结果
+        sendSystemMessage(this.room, `游戏结束！${winnerName} 获胜！`)
+
         this.room.broadcast("game.end", {
             winnerId,
             rankings,
@@ -378,20 +362,16 @@ export class GameEngine {
                 points: p.points,
                 total: p.getTotalScore(),
             })),
+            players: this.players.map((p) => p.toPublicInfo()),
             state: this.getState(),
         })
     }
 
-    // 辅助方法
-    getCurrentPlayerId(): string {
-        return ""
-    }
-
     getState(playerId?: string) {
         return {
-            phase: this.phase,
+            stage: this.phase,
             currentRound: this.currentRound,
-            currentScoreCard: this.currentScoreCard,
+            currentPointCards: this.currentScoreCard ? [this.currentScoreCard] : [],
             carriedOverCards: this.carriedOverCards,
             playedCards: Array.from(this.playedCards.entries()).map(
                 ([playerId, card]) => ({ playerId, card })
@@ -399,12 +379,6 @@ export class GameEngine {
             lastPlayedCards: Array.from(this.lastPlayedCards.entries()).map(
                 ([playerId, card]) => ({ playerId, card })
             ),
-            playerHands: this.players.map((p) => ({
-                playerId: p.userId,
-                handCount: p.handCards.length,
-                scoreCardCount: p.points.length,
-                score: playerId === p.userId ? p.getTotalScore() : null,
-            })),
         }
     }
 }

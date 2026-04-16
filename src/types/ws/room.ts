@@ -1,21 +1,15 @@
+import {UserInfo} from "./user";
+
+export type RoomStatus = 'waiting' | 'playing' | 'finished';
+
 export interface RoomCreatePayload {
     roomId: string
-    user?: {
-        userId: string
-        nickname: string
-        avatar: string
-        background?: string
-    }
+    user?: UserInfo
 }
 
 export interface RoomJoinPayload {
     roomId: string
-    user: {
-        userId: string
-        nickname: string
-        avatar: string
-        background?: string
-    }
+    user: UserInfo
     reconnect?: boolean  // 标识为重连请求
 }
 
@@ -28,7 +22,7 @@ export interface RoomListPayload {
 export interface RoomInfo {
     roomId: string
     players: PlayerInfo[]
-    status: "waiting" | "playing"
+    status: RoomStatus
     maxPlayers: number
 }
 
@@ -37,18 +31,14 @@ export interface RoomUpdatePayload {
 }
 
 export interface PlayerInfo {
-    userId: string
-    avatar: string
-    card: {
-        count: number
-        list: number[]
-        background: string | null
-    }
+    user: UserInfo;
+    card: number[];
     point: {
-        count: number
-        list: number[]
-    }
-    nickname: string
-    ready: boolean
-    latency?: number  // 延迟（毫秒），undefined 表示未连接或未知
+        count: number;
+        list: number[];
+    };
+    currentPlayerCard?: number;
+    lastPlayerCard?: number;
+    ready: boolean;
+    latency: number | "offline" | null;
 }

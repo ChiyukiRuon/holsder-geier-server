@@ -1,5 +1,6 @@
 export interface PingPayload {
     serverTime: number
+    latencies?: Array<{ userId: string; latency: number }>
 }
 
 export interface PongPayload {

@@ -106,24 +106,21 @@ export const gameHandlers: HandlerMap = {
         }
 
         send(ctx, "game.stage", {
-            stage: room.game.phase,
-            round: room.game.currentRound,
-            scoreCard: room.game.currentScoreCard,
-            carriedOver: room.game.carriedOverCards,
+            players: Array.from(room.players.values()).map((p) => p.toPublicInfo()),
             state: room.game.getState(),
         })
     },
 
     "game.sync": async (ctx, msg) => {
-            send(ctx, "server.error", {
-                code: CommonError.INVALID_REQUEST,
-                message: "game.sync is server-push only",
-                requestId: msg.requestId,
-            })
-        },
+        send(ctx, "server.error", {
+            code: CommonError.INVALID_REQUEST,
+            message: "game.sync is server-push only",
+            requestId: msg.requestId,
+        })
+    },
 
     "game.action": async (ctx, msg) => {
-        const { actionId, actionType, data } = msg.payload
+        const { action } = msg.payload
 
         if (!ctx.roomId || !ctx.userId) {
             send(ctx, "server.error", {
@@ -145,12 +142,16 @@ export const gameHandlers: HandlerMap = {
         }
 
         try {
-            room.game.handleAction(ctx.userId, { actionId, actionType, data })
-            logger.game("Player action received", { roomId: ctx.roomId, userId: ctx.userId, actionType, card: data.card })
+            room.game.handleAction(ctx.userId, {
+                actionId: "",
+                actionType: "play_card",
+                data: { card: action.card }
+            })
+            logger.game("Player action received", { roomId: ctx.roomId, userId: ctx.userId, card: action.card })
 
             send(ctx, "server.ack", { requestId: msg.requestId! })
         } catch (err: any) {
-            logger.gameWarn("Player action failed", { roomId: ctx.roomId, userId: ctx.userId, actionType, error: err.message })
+            logger.gameWarn("Player action failed", { roomId: ctx.roomId, userId: ctx.userId, error: err.message })
             send(ctx, "server.error", {
                 code: err.message || GameError.ACTION_FAILED,
                 message: err.message || "Action failed",

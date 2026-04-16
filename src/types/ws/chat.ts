@@ -1,9 +1,14 @@
+import {UserInfo} from "./user";
+
 export interface ChatSendPayload {
+    user: UserInfo
     message: string
+    timestamp: number
 }
 
 export interface ChatReceivePayload {
-    userId: string
+    user?: UserInfo
+    type: 'system' | 'user'
     message: string
     timestamp: number
 }

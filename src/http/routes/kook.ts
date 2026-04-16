@@ -36,6 +36,7 @@ router.get("/user", async (req, res) => {
                 Authorization: `Bearer ${token.access_token}`,
             }
         })
+
         return success(res, userInfo)
     } catch (error) {
         const kookError = error as KookError
