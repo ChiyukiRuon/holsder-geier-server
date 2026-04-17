@@ -20,5 +20,6 @@ export interface ErrorPayload {
 export interface InfoPayload {
     service: string
     version: string
-    environment: "production" | "development" | "test" | string
+    environment: "production" | "development" | "test" | string,
+    serverTime: number
 }

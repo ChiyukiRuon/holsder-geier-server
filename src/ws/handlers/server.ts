@@ -6,7 +6,8 @@ export const serverHandlers: HandlerMap = {
         send(ctx, "server.info", {
             service: "Holsder Geier Websocket Service",
             version: packageJson.version,
-            environment: process.env.RUNTIME_ENV || "-"
+            environment: process.env.RUNTIME_ENV || "-",
+            serverTime: Date.now(),
         })
     },
 }

@@ -16,85 +16,52 @@ export function createWsServer(server: http.Server) {
 
     logger.ws("WebSocket server initialized", { path: "/ws" })
 
-    // 定时发送 ping
+    // 心跳
     setInterval(() => {
         const now = Date.now()
 
-        // 收集所有已加入房间的玩家，按房间分组
-        const roomsWithPlayers = new Map<string, Set<any>>()
-        const playersWithoutRoom: any[] = []
-
         activeConnections.forEach((ctx) => {
-            if (ctx.userId && ctx.roomId) {
-                if (!roomsWithPlayers.has(ctx.roomId)) {
-                    roomsWithPlayers.set(ctx.roomId, new Set())
-                }
-                roomsWithPlayers.get(ctx.roomId)!.add(ctx)
-            } else if (ctx.userId && !ctx.roomId) {
-                // 已连接但未加入房间的玩家，视为离线
-                playersWithoutRoom.push(ctx)
-            }
-        })
+            if (!ctx.ws || ctx.ws.readyState !== 1) return
 
-        // 为每个房间的玩家发送包含房间内所有玩家延迟的 ping
-        roomsWithPlayers.forEach((connectedPlayers, roomId) => {
-            const room = roomManager.getRoom(roomId)
-            if (!room) return
+            ctx.lastPingTime = now
 
-            // 构建房间内所有玩家的延迟信息（包括可能离线的玩家）
-            const latencies: Array<{ userId: string; latency: number }> = []
-            room.players.forEach((playerState, userId) => {
-                // 获取玩家的延迟，如果玩家当前未连接则为 -999
-                const latency = playerState.ctx.ws.readyState === 1 ? (playerState.ctx.latency ?? -999) : -999
-                latencies.push({
-                    userId,
-                    latency,
-                })
-            })
+            // 在房间就带上房间延迟信息
+            let latencies: Array<{ userId: string; latency: number }> | undefined
 
-            // 向房间内所有在线玩家发送 ping
-            connectedPlayers.forEach((ctx) => {
-                if (ctx.ws && ctx.ws.readyState === 1) {
-                    ctx.lastPingTime = now
-                    send(ctx, "server.ping", {
-                        serverTime: now,
-                        latencies: latencies.length > 0 ? latencies : undefined,
+            if (ctx.userState === "room" && ctx.roomId) {
+                const room = roomManager.getRoom(ctx.roomId)
+                if (room) {
+                    latencies = []
+
+                    room.players.forEach((playerState, userId) => {
+                        const latency =
+                            playerState.ctx.ws.readyState === 1
+                                ? (playerState.ctx.latency ?? -999)
+                                : -999
+
+                        latencies!.push({ userId, latency })
                     })
                 }
-            })
-        })
+            }
 
-        // 对未加入房间的玩家，直接断开连接（视为离线）
-        playersWithoutRoom.forEach((ctx) => {
-            logger.warn(LogCategory.WS, "WS client without room detected as offline, closing connection", {
-                userId: ctx.userId,
+            send(ctx, "server.ping", {
+                serverTime: now,
+                latencies,
             })
-            ctx.ws.terminate()
         })
     }, PING_INTERVAL)
 
-    // 定期检查已加入房间的玩家的离线状态
+    // 在线状态检测
     setInterval(() => {
         const now = Date.now()
         activeConnections.forEach((ctx) => {
-            if (ctx.ws && ctx.ws.readyState === 1 && ctx.roomId) {
-                // 如果从未收到过 pong，检查是否超过 PING_TIMEOUT
+            if (ctx.ws && ctx.ws.readyState === 1) {
                 const lastPong = ctx.lastPongTime || ctx.lastPingTime
-                if (!lastPong) {
-                    // 没有任何 ping/pong 记录，跳过（刚连接的客户端）
-                    return
-                }
+                if (!lastPong) return
 
                 const elapsed = now - lastPong
-                // 如果超过 PING_TIMEOUT 未收到响应，认为客户端离线
+
                 if (elapsed > PING_TIMEOUT) {
-                    logger.warn(LogCategory.WS, "WS ping timeout, closing connection", {
-                        userId: ctx.userId,
-                        roomId: ctx.roomId,
-                        elapsed,
-                        lastPongTime: ctx.lastPongTime,
-                        lastPingTime: ctx.lastPingTime
-                    })
                     ctx.ws.terminate()
                 }
             }
@@ -117,15 +84,43 @@ export function createWsServer(server: http.Server) {
                 const room = roomManager.getRoom(ctx.roomId)
                 if (room) {
                     const nickname = ctx.user?.nickname ?? ctx.userId
+                    const isGamePlaying = room.status === "playing"
 
-                    sendSystemMessage(room, `${nickname} 断开连接`)
+                    if (isGamePlaying) {
+                        // 游戏进行中：认定为掉线，保留玩家信息
+                        logger.info(LogCategory.WS, "Player disconnected during game (marked as offline)", {
+                            userId: ctx.userId,
+                            roomId: ctx.roomId
+                        })
 
-                    room.broadcast("room.update", {
-                        room: room.toRoomInfo(),
-                    })
+                        sendSystemMessage(room, `${nickname} 掉线`)
 
-                    if (room.game) {
-                        logger.info(LogCategory.WS, "Player disconnected from room", { userId: ctx.userId, roomId: ctx.roomId })
+                        // 检查是否所有玩家都断开连接
+                        checkAndDestroyEmptyRoom(room)
+                    } else {
+                        // 游戏未开始：直接离开房间
+                        logger.info(LogCategory.WS, "Player left room before game started", {
+                            userId: ctx.userId,
+                            roomId: ctx.roomId
+                        })
+
+                        sendSystemMessage(room, `${nickname} 离开了房间`)
+
+                        room.removePlayer(ctx.userId)
+                        ctx.roomId = undefined
+                        ctx.userState = "lobby"
+
+                        // 检查是否所有玩家都断开连接
+                        if (room.players.size === 0) {
+                            roomManager.deleteRoom(ctx.roomId)
+                            logger.room("Room deleted (all players disconnected before game)", {
+                                roomId: ctx.roomId
+                            })
+                        } else {
+                            room.broadcast("room.update", {
+                                room: room.toRoomInfo(),
+                            })
+                        }
                     }
                 }
             }
@@ -147,6 +142,34 @@ export function createWsServer(server: http.Server) {
     wss.on("close", () => {
         logger.ws("WebSocket server closed")
     })
+}
+
+// 检查并销毁空房间（所有玩家都断开连接）
+function checkAndDestroyEmptyRoom(room: any) {
+    let allDisconnected = true
+
+    room.players.forEach((playerState: any) => {
+        if (playerState.ctx.ws && playerState.ctx.ws.readyState === 1) {
+            allDisconnected = false
+        }
+    })
+
+    if (allDisconnected && room.players.size > 0) {
+        logger.room("All players disconnected, destroying room immediately", {
+            roomId: room.roomId,
+            playerCount: room.players.size
+        })
+
+        // 如果游戏正在进行，需要清理游戏状态
+        if (room.game && room.status === "playing") {
+            logger.game("Cleaning up game state due to all players disconnecting", {
+                roomId: room.roomId
+            })
+        }
+
+        // 销毁房间
+        roomManager.deleteRoom(room.roomId)
+    }
 }
 
 // 导出用于其他模块访问活跃连接（用于更新延迟等）

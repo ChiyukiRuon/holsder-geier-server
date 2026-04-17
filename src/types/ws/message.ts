@@ -23,11 +23,11 @@ export interface MessageMap {
     // game
     "game.ready": Game.GameReadyPayload
     "game.start": Game.GameStartPayload
-    "game.end": Game.GameEndPayload
-    "game.stage": Game.GameStagePayload
     "game.action": Game.GameActionPayload
     "game.sync": Game.GameSyncPayload
     "game.resolve": Game.GameResolvePayload
+    "game.end": Game.GameEndPayload
+    "game.state": Game.GameStatePayload
 
     // server
     "server.ping": Server.PingPayload

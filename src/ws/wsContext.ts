@@ -8,7 +8,8 @@ export interface WsContext {
 
     user?: UserInfo
 
-    ready?: boolean
+    userReady?: boolean
+    userState?: "lobby" | "room"
 
     card?: number[] // 手牌列表
     point?: {
@@ -16,7 +17,9 @@ export interface WsContext {
         count: number // 得分
     }
 
-    // Ping/Pong 相关
+    currentPlayedCard?: number | null
+    lastPlayedCard?: number | null
+
     latency?: number        // 延迟（毫秒）
     lastPingTime?: number   // 上次发送 ping 的时间戳
     lastPongTime?: number   // 最后收到 pong 的时间戳

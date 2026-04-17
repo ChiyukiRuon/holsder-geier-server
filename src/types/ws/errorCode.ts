@@ -20,7 +20,7 @@ export const RoomError = {
     ROOM_NOT_FOUND: "ROOM_NOT_FOUND",         // 房间不存在
     ROOM_ALREADY_EXISTS: "ROOM_ALREADY_EXISTS", // 房间已存在
     ROOM_FULL: "ROOM_FULL",                   // 房间已满
-    RECONNECT_FAILED: "RECONNECT_FAILED",     // 重连失败
+    JOIN_FAILED: "JOIN_FAILED",               // 加入房间失败
 } as const
 
 // 游戏相关错误码

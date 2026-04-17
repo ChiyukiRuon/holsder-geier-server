@@ -33,6 +33,7 @@ export class Room {
         const player = new PlayerState(ctx)
         this.players.set(ctx.userId, player)
         ctx.roomId = this.roomId
+        ctx.userState = "room"
     }
 
     removePlayer(userId: string) {
@@ -79,6 +80,11 @@ export class Room {
         if (!this.allReady()) return
 
         this.status = "playing"
+
+        for (const player of this.players.values()) {
+            player.ready = false
+        }
+
         this.game = new GameEngine(this)
         this.game.start()
     }
@@ -114,50 +120,85 @@ export class RoomManager {
         return this.rooms.get(roomId)
     }
 
-    joinRoom(ctx: WsContext, roomId: string) {
+    deleteRoom(roomId: string) {
         const room = this.rooms.get(roomId)
-        if (!room) throw new Error("ROOM_NOT_FOUND")
+        if (!room) return
 
-        room.addPlayer(ctx)
-        logger.room("Player joined room", { roomId, userId: ctx.userId, playerCount: room.players.size })
-
-        const nickname = ctx.user?.nickname ?? ctx.userId
-        sendSystemMessage(room, `${nickname} 加入了房间`)
-
-        room.broadcast("room.update", {
-            room: room.toRoomInfo(),
+        // 清理所有玩家的房间状态
+        room.players.forEach((player) => {
+            player.ctx.roomId = undefined
+            player.ctx.userState = "lobby"
         })
 
-        return room
+        this.rooms.delete(roomId)
+        logger.room("Room deleted", { roomId, totalRooms: this.rooms.size })
     }
 
-    // 断线重连：将新的ctx关联到现有玩家
-    rejoinRoom(ctx: WsContext, roomId: string, user: UserInfo) {
+    joinRoom(ctx: WsContext, roomId: string, user: UserInfo) {
         const room = this.rooms.get(roomId)
         if (!room) throw new Error("ROOM_NOT_FOUND")
 
-        const player = room.getPlayer(user.userId)
-        if (!player) throw new Error("PLAYER_NOT_FOUND")
+        // 检查是否是该玩家的重连（玩家仍在房间列表中但websocket已断开）
+        const existingPlayer = room.getPlayer(user.userId)
+        const isReconnect = existingPlayer !== undefined
 
-        // 更新PlayerState的ctx引用
-        player.ctx = ctx
-        ctx.userId = user.userId
-        ctx.roomId = roomId
+        if (isReconnect) {
+            // 重连逻辑：更新现有玩家的ctx引用
+            existingPlayer.ctx = ctx
+            ctx.userId = user.userId
+            ctx.roomId = roomId
+            ctx.userState = "room"
 
-        // 更新用户信息（允许用户信息在断线期间更新）
-        ctx.user = {
-            userId: user.userId,
-            nickname: user.nickname,
-            avatar: user.avatar,
-            background: user.background,
-            color: user.color,
+            // 更新用户信息（允许用户信息在断线期间更新）
+            ctx.user = {
+                userId: user.userId,
+                nickname: user.nickname,
+                avatar: user.avatar,
+                background: user.background,
+                color: user.color,
+            }
+
+            // 重置ping/pong状态，避免立即被判定为离线
+            ctx.lastPongTime = Date.now()
+            ctx.latency = undefined
+
+            logger.room("Player reconnected to room", {
+                roomId,
+                userId: user.userId,
+                gameStatus: room.status
+            })
+
+            sendSystemMessage(room, `${user.nickname} 重新连接`)
+        } else {
+            // 新加入逻辑
+            if (room.players.size >= room.maxPlayers) {
+                throw new Error("ROOM_FULL")
+            }
+
+            // 先设置 ctx.userId，因为 addPlayer 需要它
+            ctx.userId = user.userId
+
+            // 设置用户信息
+            ctx.user = {
+                userId: user.userId,
+                nickname: user.nickname,
+                avatar: user.avatar ?? "",
+                background: user.background,
+                color: user.color,
+            }
+
+            // 再添加玩家到房间
+            room.addPlayer(ctx)
+
+            logger.room("Player joined room", {
+                roomId,
+                userId: ctx.userId,
+                playerCount: room.players.size
+            })
+
+            const nickname = ctx.user?.nickname ?? ctx.userId
+            sendSystemMessage(room, `${nickname} 加入了房间`)
         }
-
-        // 重置ping/pong状态，避免立即被判定为离线
-        ctx.lastPongTime = Date.now()
-        ctx.latency = undefined
-
-        logger.room("Player reconnected", { roomId, userId: user.userId, gameStatus: room.game ? "playing" : "waiting" })
 
         // 广播房间更新
         room.broadcast("room.update", {
@@ -177,6 +218,7 @@ export class RoomManager {
 
         room.removePlayer(ctx.userId)
         ctx.roomId = undefined
+        ctx.userState = "lobby"
 
         logger.room("Player left room", { roomId: room.roomId, userId: ctx.userId, playerCount: room.players.size })
 

@@ -44,7 +44,7 @@ export const roomHandlers: HandlerMap = {
     },
 
     "room.join": async (ctx, msg) => {
-        const { roomId, user, reconnect } = msg.payload
+        const { roomId, user } = msg.payload
 
         if (!user) {
             send(ctx, "server.error", {
@@ -83,60 +83,48 @@ export const roomHandlers: HandlerMap = {
             return
         }
 
-        // 重连逻辑
-        if (reconnect) {
-            try {
-                roomManager.rejoinRoom(ctx, roomId, user)
-                logger.room("Player rejoined room", { roomId, userId: user.userId })
+        try {
+            // joinRoom 会自动判断是重连还是新加入
+            roomManager.joinRoom(ctx, roomId, user)
 
-                // 发送聊天历史
-                send(ctx, "chat.sync", {
-                    messages: room.getChatHistory(),
+            logger.room("Player processed for room", {
+                roomId,
+                userId: user.userId,
+                isReconnect: room.getPlayer(user.userId)?.ctx.ws.readyState === 1
+            })
+
+            // 发送聊天历史
+            send(ctx, "chat.sync", {
+                messages: room.getChatHistory(),
+            })
+
+            // 如果游戏正在进行，发送游戏状态
+            if (room.status === "playing" && room.game) {
+                logger.game("Sending game state to player", {
+                    roomId,
+                    userId: user.userId,
+                    gameStage: room.game.stage
                 })
 
-                // 如果游戏正在进行，发送游戏状态
-                if (room.game) {
-                    send(ctx, "game.stage", {
-                        players: Array.from(room.players.values()).map((p) => p.toPublicInfo()),
-                        state: room.game.getState(),
-                    })
-                }
+                const playerList = room.game.buildPlayerListForPlayer(user.userId)
+                const gameState = room.game.buildStateForPlayer(user.userId)
 
-                send(ctx, "server.ack", {
-                    requestId: msg.requestId!,
+                send(ctx, "game.state", {
+                    players: playerList,
+                    state: gameState,
                 })
-                return
-            } catch (err: any) {
-                send(ctx, "server.error", {
-                    code: err.message || RoomError.RECONNECT_FAILED,
-                    message: err.message || "Reconnect failed",
-                    requestId: msg.requestId,
-                })
-                return
             }
+
+            send(ctx, "server.ack", {
+                requestId: msg.requestId!,
+            })
+        } catch (err: any) {
+            send(ctx, "server.error", {
+                code: err.message || RoomError.JOIN_FAILED,
+                message: err.message || "Join room failed",
+                requestId: msg.requestId,
+            })
         }
-
-        // 正常加入：设置用户信息
-        ctx.userId = user.userId
-        ctx.user = {
-            userId: user.userId,
-            nickname: user.nickname,
-            avatar: user.avatar,
-            background: user.background,
-            color: user.color,
-        }
-
-        roomManager.joinRoom(ctx, roomId)
-        logger.room("Player joined room", { roomId, userId: user.userId })
-
-        // 发送聊天历史给新加入的玩家
-        send(ctx, "chat.sync", {
-            messages: room.getChatHistory(),
-        })
-
-        send(ctx, "server.ack", {
-            requestId: msg.requestId!,
-        })
     },
 
     "room.leave": async (ctx, msg) => {

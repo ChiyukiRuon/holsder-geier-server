@@ -1,9 +1,12 @@
+import dotenv from "dotenv";
 import http from "http"
 import { createApp } from "./http/app"
 import { createWsServer } from "./ws/wsServer"
 import { logger, LogLevel } from "./utils/logger"
 
-const PORT = 47381
+dotenv.config();
+
+const PORT = process.env.PORT || 47381
 
 async function bootstrap() {
     logger.setLevel(LogLevel.DEBUG)

@@ -37,8 +37,8 @@ export interface PlayerInfo {
         count: number;
         list: number[];
     };
-    currentPlayerCard?: number;
-    lastPlayerCard?: number;
+    currentPlayedCard: number |  null;
+    lastPlayedCard: number | null;
     ready: boolean;
-    latency: number | "offline" | null;
+    latency: number;
 }

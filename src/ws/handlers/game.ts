@@ -76,38 +76,11 @@ export const gameHandlers: HandlerMap = {
         })
     },
 
-    "game.stage": async (ctx, msg) => {
-        if (!ctx.roomId) {
-            send(ctx, "server.error", {
-                code: CommonError.NOT_IN_ROOM,
-                message: "You are not in any room",
-                requestId: msg.requestId,
-            })
-            return
-        }
-
-        const room = roomManager.getRoom(ctx.roomId)
-        if (!room) {
-            send(ctx, "server.error", {
-                code: RoomError.ROOM_NOT_FOUND,
-                message: "Room not found",
-                requestId: msg.requestId,
-            })
-            return
-        }
-
-        if (!room.game) {
-            send(ctx, "server.error", {
-                code: GameError.GAME_NOT_STARTED,
-                message: "Game has not started",
-                requestId: msg.requestId,
-            })
-            return
-        }
-
-        send(ctx, "game.stage", {
-            players: Array.from(room.players.values()).map((p) => p.toPublicInfo()),
-            state: room.game.getState(),
+    "game.state": async (ctx, msg) => {
+        send(ctx, "server.error", {
+            code: CommonError.INVALID_REQUEST,
+            message: "game.sync is server-push only",
+            requestId: msg.requestId,
         })
     },
 
@@ -143,8 +116,6 @@ export const gameHandlers: HandlerMap = {
 
         try {
             room.game.handleAction(ctx.userId, {
-                actionId: "",
-                actionType: "play_card",
                 data: { card: action.card }
             })
             logger.game("Player action received", { roomId: ctx.roomId, userId: ctx.userId, card: action.card })

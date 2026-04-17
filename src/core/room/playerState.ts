@@ -31,11 +31,13 @@ export class PlayerState {
                 color: this.ctx.user?.color ?? "",
             },
             ready: this.ready,
-            card: [],
+            card: this.handCards,
             point: {
                 count: this.points.length,
                 list: this.points,
             },
+            currentPlayedCard: this.ctx.currentPlayedCard ?? null,
+            lastPlayedCard: this.ctx.lastPlayedCard ?? null,
             latency: this.ctx.ws.readyState === 1 ? (this.ctx.latency ?? -999) : -999,
         }
     }

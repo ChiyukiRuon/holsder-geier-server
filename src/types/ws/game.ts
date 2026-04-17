@@ -1,9 +1,5 @@
 import {PlayerInfo} from "./room";
 
-export interface PointCard {
-    value: number;
-}
-
 export type GameStage = 'idle' | 'reveal' | 'play' | 'resolve' | 'end';
 
 export interface GameReadyPayload {
@@ -13,8 +9,8 @@ export interface GameReadyPayload {
 export interface GameState {
     stage: GameStage
     currentRound: number
-    currentPointCards: PointCard[]
-    carriedOverCards: PointCard[]
+    currentPointCard: number | null
+    carriedOverCards: number[]
     playedCards: Array<{ playerId: string; card: number | null }>
     lastPlayedCards?: Array<{ playerId: string; card: number | null }>
 }
@@ -39,9 +35,15 @@ export interface GameEndPayload {
     state: GameState
 }
 
-export interface GameStagePayload {
+export interface GameStatePayload {
     players: PlayerInfo[]
     state: GameState
+}
+
+export interface GameResolvePayload {
+    players: PlayerInfo[]
+    state: GameState
+    roundWinner: PlayerInfo | null
 }
 
 export interface GameSyncPayload {
@@ -53,12 +55,6 @@ export interface GameSyncPayload {
 
 export interface GameActionPayload {
     action: {
-        player: PlayerInfo
         card: number
     }
-}
-
-export interface GameResolvePayload {
-    players: PlayerInfo[]
-    state: GameState
 }

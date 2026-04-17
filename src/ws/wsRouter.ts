@@ -3,6 +3,7 @@ import { handlers } from "./handlers"
 import { WsContext } from "./wsContext"
 import {MessageMap, WsMessage} from "../types/ws/message";
 import { logger, LogCategory } from "../utils/logger";
+import packageJson from "../../package.json";
 
 export type { MessageMap, WsMessage }
 export type HandlerMap = {
@@ -13,7 +14,14 @@ export type HandlerMap = {
 }
 
 export function handleWsConnection(ws: WebSocket) {
-    const ctx: WsContext = { ws }
+    const ctx: WsContext = { ws, userState: "lobby" }
+
+    send(ctx, "server.info", {
+        service: "Holsder Geier Websocket Service",
+        version: packageJson.version,
+        environment: process.env.RUNTIME_ENV || "-",
+        serverTime: Date.now(),
+    })
 
     // 保存ctx到ws对象，以便关闭事件中访问
     ;(ws as any)._ctx = ctx
