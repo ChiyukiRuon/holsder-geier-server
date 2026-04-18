@@ -105,9 +105,7 @@ jobs:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          source: |
-            package.json
-            dist
+          source: "package.json,dist/**"
           target: "/www/wwwroot/${{ steps.pkg.outputs.name }}"
           strip_components: 0
 
