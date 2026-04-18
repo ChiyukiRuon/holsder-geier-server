@@ -42,7 +42,7 @@ export class PlayerState {
         }
     }
 
-    getTotalScore(): number {
+    getTotalPoint(): number {
         return this.points.reduce((sum, p) => sum + p, 0)
     }
 
@@ -50,7 +50,7 @@ export class PlayerState {
         return {
             handCards: this.handCards,
             points: this.points,
-            totalScore: this.getTotalScore(),
+            totalScore: this.getTotalPoint(),
         }
     }
 }

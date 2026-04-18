@@ -71,12 +71,6 @@ jobs:
         if: steps.compare.outputs.skip == 'false'
         run: npm run build
 
-      - name: Debug dist
-        if: steps.compare.outputs.skip == 'false'
-        run: |
-          echo "=== FILE TREE ==="
-          ls -R
-
       - name: Check dist exists
         if: steps.compare.outputs.skip == 'false'
         run: |

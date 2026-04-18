@@ -269,7 +269,7 @@ export class GameEngine {
         const rankings = [...this.players]
             .map((p) => ({
                 playerId: p.userId,
-                total: p.getTotalScore(),
+                total: p.getTotalPoint(),
             }))
             .sort((a, b) => b.total - a.total)
 
@@ -297,10 +297,10 @@ export class GameEngine {
         this.room.broadcast("game.end", {
             winnerId: isTie ? undefined : winnerId,
             rankings,
-            playerPoints: this.players.map((p) => ({
+            playerPointDetails: this.players.map((p) => ({
                 playerId: p.userId,
-                points: p.points,
-                total: p.getTotalScore(),
+                pointCards: p.points,
+                totalPoint: p.getTotalPoint(),
             })),
             players: this.players.map((p) => p.toPublicInfo()),
             state: this.getState(),
