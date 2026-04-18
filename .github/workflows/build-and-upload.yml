@@ -80,7 +80,6 @@ jobs:
         key: ${{ secrets.SERVER_SSH_KEY }}
         script: |          
           mkdir -p "/www/wwwroot/${{ steps.pkg.outputs.name }}"
-          chmod 755 "/www/wwwroot/${{ steps.pkg.outputs.name }}"
 
       # 7. 上传 package.json 和 dist
     - name: Upload project files to server
