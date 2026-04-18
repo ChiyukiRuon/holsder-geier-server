@@ -35,6 +35,7 @@ export interface MessageMap {
     "server.ack": Server.AckPayload
     "server.error": Server.ErrorPayload
     "server.info": Server.InfoPayload
+    "server.toast": Server.ToastPayload
 }
 
 export type WsMessage<T extends keyof MessageMap = keyof MessageMap> = {

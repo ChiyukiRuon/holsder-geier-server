@@ -93,7 +93,7 @@ export function createWsServer(server: http.Server) {
                             roomId: ctx.roomId
                         })
 
-                        sendSystemMessage(room, `${nickname} 掉线`)
+                        sendSystemMessage(room, `${nickname} 断开连接`)
 
                         // 检查是否所有玩家都断开连接
                         checkAndDestroyEmptyRoom(room)
@@ -131,6 +131,7 @@ export function createWsServer(server: http.Server) {
         // 新连接加入活跃连接集合
         const ctx = (ws as any)._ctx
         if (ctx) {
+            ctx.latency = 0
             activeConnections.add(ctx)
         }
     })

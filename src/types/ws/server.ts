@@ -23,3 +23,8 @@ export interface InfoPayload {
     environment: "production" | "development" | "test" | string,
     serverTime: number
 }
+
+export interface ToastPayload {
+    message: string
+    type: "info" | "success" | "warning" | "danger"
+}

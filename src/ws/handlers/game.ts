@@ -1,7 +1,7 @@
 import { HandlerMap } from "../wsRouter"
 import { send } from "../wsRouter"
 import { roomManager } from "../../core/room/roomManager"
-import { logger, LogCategory } from "../../utils/logger"
+import { logger } from "../../utils/logger"
 import { CommonError, RoomError, GameError } from "../../types/ws/errorCode"
 
 export const gameHandlers: HandlerMap = {
@@ -55,6 +55,15 @@ export const gameHandlers: HandlerMap = {
         if (room.allReady() && room.players.size >= 2) {
             logger.game("All players ready, starting game", { roomId: ctx.roomId, playerCount: room.players.size })
             room.startGame()
+        } else if (room.allReady()) {
+            logger.game("Not enough players ready, waiting for more players", {
+                roomId: ctx.roomId,
+                playerCount: room.players.size,
+            })
+            room.broadcast("server.toast", {
+                type: "info",
+                message: "至少需要 2 名玩家才能开始游戏",
+            })
         }
 
         send(ctx, "server.ack", { requestId: msg.requestId! })
