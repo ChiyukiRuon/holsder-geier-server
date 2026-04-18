@@ -70,30 +70,31 @@ jobs:
       if: steps.compare.outputs.skip == 'false'
       run: npm run build
 
-    # 6. 创建目标目录
+      # 6. 创建目标目录
     - name: Pre-create target directory
       if: steps.compare.outputs.skip == 'false'
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.SERVER_IP }}
-        username: github_upload
+        username: ${{ secrets.SERVER_USER }}
         key: ${{ secrets.SERVER_SSH_KEY }}
-        script: |
+        script: |          
           mkdir -p "/www/wwwroot/${{ steps.pkg.outputs.name }}"
-          rm -rf "/www/wwwroot/${{ steps.pkg.outputs.name }}/*"
           chmod 755 "/www/wwwroot/${{ steps.pkg.outputs.name }}"
 
-    # 7. 上传 dist
-    - name: Upload dist to server
+      # 7. 上传 package.json 和 dist
+    - name: Upload project files to server
       if: steps.compare.outputs.skip == 'false'
       uses: appleboy/scp-action@v0.1.7
       with:
         host: ${{ secrets.SERVER_IP }}
         username: ${{ secrets.SERVER_USER }}
         key: ${{ secrets.SERVER_SSH_KEY }}
-        source: "dist/*"
+        source: |          
+          package.json
+          dist/**
         target: "/www/wwwroot/${{ steps.pkg.outputs.name }}"
-        strip_components: 1
+        strip_components: 0
 
       # 8. 导出是否真正执行了 build
     - name: Export build flag

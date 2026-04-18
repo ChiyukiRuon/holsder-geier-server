@@ -4,6 +4,7 @@ import { WsContext } from "./wsContext"
 import {MessageMap, WsMessage} from "../types/ws/message";
 import { logger, LogCategory } from "../utils/logger";
 import packageJson from "../../package.json";
+import {PongPayload} from "../types/ws/server";
 
 export type { MessageMap, WsMessage }
 export type HandlerMap = {
@@ -37,10 +38,10 @@ export function handleWsConnection(ws: WebSocket) {
 
         // 处理 pong 消息，计算延迟
         if (msg.type === "client.pong") {
-            const payload = msg.payload as { clientTime?: number; serverTime?: number }
-            if (payload.clientTime !== undefined) {
+            const payload = msg.payload as PongPayload
+            if (payload.pingTime !== undefined) {
                 const now = Date.now()
-                ctx.latency = now - payload.clientTime
+                ctx.latency = now - payload.pingTime
                 ctx.lastPongTime = now
                 logger.debug(LogCategory.WS, "Pong received", { userId: ctx.userId, latency: ctx.latency })
             }

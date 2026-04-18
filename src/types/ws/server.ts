@@ -4,7 +4,7 @@ export interface PingPayload {
 }
 
 export interface PongPayload {
-    clientTime: number
+    pingTime: number
 }
 
 export interface AckPayload {
