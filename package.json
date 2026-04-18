@@ -1,10 +1,12 @@
 {
   "name": "holsder-geier-server",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "ts-node-dev src/index.ts"
+    "start": "node dist/index.js",
+    "build": "tsc",
+    "dev": "ts-node-dev src/index.ts"
   },
   "keywords": [],
   "author": "ChiyukiRuon",
@@ -28,7 +30,6 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "multer": "^2.1.1",
-    "uuid": "^13.0.0",
     "ws": "^8.20.0"
   }
 }

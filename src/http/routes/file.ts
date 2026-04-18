@@ -2,7 +2,6 @@ import { Router, Request, Response } from "express"
 import multer from "multer"
 import { success, created, badRequest } from "../utils/response"
 import { upload as cosUpload, remove as cosRemove, getPublicUrl, getSignedUrl, isExist as cosFileExist } from "../cos"
-import { v4 as uuidv4 } from "uuid"
 
 const router = Router()
 
@@ -41,8 +40,8 @@ router.post("/images", upload.single("file"), async (req: MulterRequest, res: Re
         return badRequest(res, "Invalid usage")
     }
 
-    const ext = file.originalname.split(".").pop()?.toLowerCase() || "png"
-    const key = `hdg/${usage}/${uuidv4()}.${ext}`
+    const ext = file.mimetype.split("/")[1] || "png"
+    const key = `hdg/${usage}/${crypto.randomUUID()}.${ext}`
 
     try {
         const result = await cosUpload({

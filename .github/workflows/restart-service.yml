@@ -1,0 +1,59 @@
+name: Restart Service
+
+on:
+  workflow_run:
+    workflows: ["Build And Upload Node Dist"]
+    types:
+      - completed
+
+jobs:
+  restart:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Download build flag
+        uses: actions/download-artifact@v4
+        with:
+          name: build-flag
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check build result
+        id: check
+        run: |
+          if [ ! -f built.txt ]; then
+            echo "restart=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          FLAG=$(cat built.txt)
+          echo "Build flag: $FLAG"
+
+          if [ "$FLAG" = "true" ]; then
+            echo "restart=true" >> $GITHUB_OUTPUT
+          else
+            echo "restart=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout
+        if: steps.check.outputs.restart == 'true'
+        uses: actions/checkout@v4
+
+      - name: Read package name
+        if: steps.check.outputs.restart == 'true'
+        id: pkg
+        run: |
+          NAME=$(jq -r .name package.json)
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+
+      - name: Restart Service
+        if: steps.check.outputs.restart == 'true'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            sudo /www/server/nodejs/vhost/scripts/deploy_restart.sh "${{ steps.pkg.outputs.name }}"

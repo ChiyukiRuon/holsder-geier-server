@@ -30,6 +30,21 @@ const LOG_LEVEL_COLORS: Record<LogLevel, string> = {
 
 const RESET_COLOR = "\x1b[0m"
 
+export const logLevel = (level: string) => {
+    switch (level) {
+        case "DEBUG":
+            return LogLevel.DEBUG
+        case "INFO":
+            return LogLevel.INFO
+        case "WARN":
+            return LogLevel.WARN
+        case "ERROR":
+            return LogLevel.ERROR
+        default:
+            return LogLevel.INFO
+    }
+}
+
 class Logger {
     private minLevel: LogLevel = LogLevel.INFO
     private enableColors: boolean = true
