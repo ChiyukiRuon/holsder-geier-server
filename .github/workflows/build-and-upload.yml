@@ -9,99 +9,115 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    # 1. 读取本地 package.json 里的版本
-    - name: Read package info
-      id: pkg
-      run: |
-        NAME=$(jq -r .name package.json)
-        VERSION=$(jq -r .version package.json)
-        echo "name=$NAME" >> $GITHUB_OUTPUT
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
+      # package.json
+      - name: Read package info
+        id: pkg
+        run: |
+          NAME=$(jq -r .name package.json)
+          VERSION=$(jq -r .version package.json)
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-    # 2. 获取生产环境中运行的版本
-    - name: Fetch remote version
-      id: remote
-      run: |
-        RESPONSE=$(curl -s --max-time 20 https://${{ secrets.API_URL }}/info || echo "fail")
-        
-        if [ "$RESPONSE" = "fail" ]; then
-          REMOTE_V="none"
-        else
-          REMOTE_V=$(echo $RESPONSE | jq -r '.data.version // "none"')
-        fi
-        
-        echo "version=$REMOTE_V" >> $GITHUB_OUTPUT
+      # 获取线上版本
+      - name: Fetch remote version
+        id: remote
+        run: |
+          RESPONSE=$(curl -s --max-time 20 https://${{ secrets.API_URL }}/info || echo "fail")
+          
+          if [ "$RESPONSE" = "fail" ]; then
+            REMOTE_V="none"
+          else
+            REMOTE_V=$(echo "$RESPONSE" | jq -r '.data.version // "none"' 2>/dev/null || echo "none")
+          fi
+          
+          echo "version=$REMOTE_V" >> $GITHUB_OUTPUT
 
-    # 3. 对比版本
-    - name: Compare version
-      id: compare
-      run: |
-        LOCAL="${{ steps.pkg.outputs.version }}"
-        REMOTE="${{ steps.remote.outputs.version }}"
+      # 比较版本
+      - name: Compare version
+        id: compare
+        run: |
+          LOCAL="${{ steps.pkg.outputs.version }}"
+          REMOTE="${{ steps.remote.outputs.version }}"
+          
+          echo "Local Version:  $LOCAL"
+          echo "Remote Version: $REMOTE"
+          
+          if [ "$LOCAL" = "$REMOTE" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Same version. Skip build."
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "Different version. Starting build..."
+          fi
 
-        echo "Local Version:  $LOCAL"
-        echo "Remote Version: $REMOTE"
+      # Node 环境
+      - name: Setup Node
+        if: steps.compare.outputs.skip == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
 
-        if [ "$LOCAL" = "$REMOTE" ]; then
-          echo "skip=true" >> $GITHUB_OUTPUT
-          echo "Same version. Skip build."
-        else
-          echo "skip=false" >> $GITHUB_OUTPUT
-          echo "Different version. Starting build..."
-        fi
+      # 安装依赖
+      - name: Install dependencies
+        if: steps.compare.outputs.skip == 'false'
+        run: npm ci
 
-    # 4. Node 环境
-    - name: Setup Node
-      if: steps.compare.outputs.skip == 'false'
-      uses: actions/setup-node@v4
-      with:
-        node-version: 20
-        cache: 'npm'
+      # 构建
+      - name: Build TypeScript
+        if: steps.compare.outputs.skip == 'false'
+        run: npm run build
 
-    # 5. 构建
-    - name: Install dependencies
-      if: steps.compare.outputs.skip == 'false'
-      run: npm ci
+      - name: Debug dist
+        if: steps.compare.outputs.skip == 'false'
+        run: |
+          echo "=== FILE TREE ==="
+          ls -R
 
-    - name: Build TypeScript
-      if: steps.compare.outputs.skip == 'false'
-      run: npm run build
+      - name: Check dist exists
+        if: steps.compare.outputs.skip == 'false'
+        run: |
+          if [ ! -d "dist" ]; then
+            echo "dist not found!"
+            exit 1
+          fi
 
-      # 6. 创建目标目录
-    - name: Pre-create target directory
-      if: steps.compare.outputs.skip == 'false'
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.SERVER_IP }}
-        username: ${{ secrets.SERVER_USER }}
-        key: ${{ secrets.SERVER_SSH_KEY }}
-        script: |          
-          mkdir -p "/www/wwwroot/${{ steps.pkg.outputs.name }}"
+      # 创建远程目录（并清空旧文件）
+      - name: Prepare remote directory
+        if: steps.compare.outputs.skip == 'false'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            mkdir -p "/www/wwwroot/${{ steps.pkg.outputs.name }}"
+            rm -rf "/www/wwwroot/${{ steps.pkg.outputs.name }}/*"
 
-      # 7. 上传 package.json 和 dist
-    - name: Upload project files to server
-      if: steps.compare.outputs.skip == 'false'
-      uses: appleboy/scp-action@v0.1.7
-      with:
-        host: ${{ secrets.SERVER_IP }}
-        username: ${{ secrets.SERVER_USER }}
-        key: ${{ secrets.SERVER_SSH_KEY }}
-        source: |          
-          package.json
-          dist/**
-        target: "/www/wwwroot/${{ steps.pkg.outputs.name }}"
-        strip_components: 0
+      # 上传
+      - name: Upload project files to server
+        if: steps.compare.outputs.skip == 'false'
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: |
+            package.json
+            dist
+          target: "/www/wwwroot/${{ steps.pkg.outputs.name }}"
+          strip_components: 0
 
-      # 8. 导出是否真正执行了 build
-    - name: Export build flag
-      run: |
-        echo "${{ steps.compare.outputs.skip == 'false' }}" > built.txt
+      # 记录是否 build
+      - name: Export build flag
+        run: |
+          echo "${{ steps.compare.outputs.skip == 'false' }}" > built.txt
 
-    - name: Upload build flag
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-flag
-        path: built.txt
+      - name: Upload build flag
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-flag
+          path: built.txt
