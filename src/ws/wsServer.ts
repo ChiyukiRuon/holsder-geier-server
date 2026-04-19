@@ -83,11 +83,37 @@ export function createWsServer(server: http.Server) {
             if (ctx && ctx.userId && ctx.roomId) {
                 const room = roomManager.getRoom(ctx.roomId)
                 if (room) {
+                    const player = room.getPlayer(ctx.userId)
+                    const spectator = room.getSpectator(ctx.userId)
                     const nickname = ctx.user?.nickname ?? ctx.userId
                     const isGamePlaying = room.status === "playing"
 
-                    if (isGamePlaying) {
-                        // 游戏进行中：认定为掉线，保留玩家信息
+                    // 观战者断开：直接离开房间（无论游戏是否进行中）
+                    if (spectator) {
+                        logger.info(LogCategory.WS, "Spectator disconnected, removing from room", {
+                            userId: ctx.userId,
+                            roomId: ctx.roomId
+                        })
+
+                        sendSystemMessage(room, `${nickname} 退出观战`)
+
+                        room.removeSpectator(ctx.userId)
+                        ctx.roomId = undefined
+                        ctx.userState = "lobby"
+
+                        // 检查房间是否为空
+                        if (room.players.size === 0 && room.spectators.size === 0) {
+                            roomManager.deleteRoom(room.roomId)
+                            logger.room("Room deleted (all users disconnected)", {
+                                roomId: ctx.roomId
+                            })
+                        } else {
+                            room.broadcast("room.update", {
+                                room: room.toRoomInfo(),
+                            })
+                        }
+                    } else if (isGamePlaying) {
+                        // 玩家在游戏进行中断开：认定为掉线，保留玩家信息
                         logger.info(LogCategory.WS, "Player disconnected during game (marked as offline)", {
                             userId: ctx.userId,
                             roomId: ctx.roomId
@@ -98,22 +124,22 @@ export function createWsServer(server: http.Server) {
                         // 检查是否所有玩家都断开连接
                         checkAndDestroyEmptyRoom(room)
                     } else {
-                        // 游戏未开始：直接离开房间
+                        // 玩家在游戏未开始时断开：直接离开房间
                         logger.info(LogCategory.WS, "Player left room before game started", {
                             userId: ctx.userId,
                             roomId: ctx.roomId
                         })
 
-                        sendSystemMessage(room, `${nickname} 离开了房间`)
+                        sendSystemMessage(room, `${nickname} 离开房间`)
 
                         room.removePlayer(ctx.userId)
                         ctx.roomId = undefined
                         ctx.userState = "lobby"
 
-                        // 检查是否所有玩家都断开连接
-                        if (room.players.size === 0) {
+                        // 检查是否所有用户都断开连接
+                        if (room.players.size === 0 && room.spectators.size === 0) {
                             roomManager.deleteRoom(ctx.roomId)
-                            logger.room("Room deleted (all players disconnected before game)", {
+                            logger.room("Room deleted (all users disconnected before game)", {
                                 roomId: ctx.roomId
                             })
                         } else {

@@ -1,17 +1,18 @@
 import {WsContext} from "../../ws/wsContext"
-import {PlayerInfo, RoomInfo} from "../../types/ws/room"
+import {RoomInfo} from "../../types/ws/room"
 import {send} from "../../ws/wsRouter"
 import {MessageMap} from "../../types/ws/message"
 import {PlayerState} from "./playerState"
 import {GameEngine} from "../game/gameEngine"
 import {ChatReceivePayload} from "../../types/ws/chat"
-import { logger, LogCategory } from "../../utils/logger"
+import { logger } from "../../utils/logger"
 import {UserInfo} from "../../types/ws/user";
 import {sendSystemMessage} from "../../ws/handlers/chat";
 
 export class Room {
     roomId: string
     players: Map<string, PlayerState> = new Map()
+    spectators: Map<string, PlayerState> = new Map()
     maxPlayers: number
     status: "waiting" | "playing" = "waiting"
     game?: GameEngine
@@ -31,7 +32,18 @@ export class Room {
         }
 
         const player = new PlayerState(ctx)
+        player.role = "player"
         this.players.set(ctx.userId, player)
+        ctx.roomId = this.roomId
+        ctx.userState = "room"
+    }
+
+    addSpectator(ctx: WsContext) {
+        if (!ctx.userId) throw new Error("NO_USER_ID")
+
+        const spectator = new PlayerState(ctx)
+        spectator.role = "spectator"
+        this.spectators.set(ctx.userId, spectator)
         ctx.roomId = this.roomId
         ctx.userState = "room"
     }
@@ -40,48 +52,110 @@ export class Room {
         this.players.delete(userId)
     }
 
+    removeSpectator(userId: string) {
+        this.spectators.delete(userId)
+    }
+
     getPlayer(userId: string): PlayerState | undefined {
         return this.players.get(userId)
     }
 
-    getPlayerList(): PlayerInfo[] {
-        return Array.from(this.players.values()).map((p) => p.toPublicInfo())
+    getSpectator(userId: string): PlayerState | undefined {
+        return this.spectators.get(userId)
+    }
+
+    getUser(userId: string): PlayerState | undefined {
+        return this.players.get(userId) || this.spectators.get(userId)
+    }
+
+    getPlayers(): PlayerState[] {
+        return Array.from(this.players.values())
+    }
+
+    getSpectators(): PlayerState[] {
+        return Array.from(this.spectators.values())
+    }
+
+    getAllUsers(): PlayerState[] {
+        return [...this.getPlayers(), ...this.getSpectators()]
     }
 
     toRoomInfo(): RoomInfo {
         return {
             roomId: this.roomId,
-            players: this.getPlayerList(),
+            players: this.getPlayers().map((p) => p.toPublicInfo()),
+            spectators: this.getSpectators().map((p) => p.toPublicInfo()),
             status: this.status,
             maxPlayers: this.maxPlayers,
         }
     }
 
     broadcast<K extends keyof MessageMap>(type: K, payload: MessageMap[K]) {
+        // 向所有玩家广播
         for (const p of this.players.values()) {
             send(p.ctx, type, payload as MessageMap[K])
+        }
+        // 向所有观战者广播
+        for (const s of this.spectators.values()) {
+            send(s.ctx, type, payload as MessageMap[K])
         }
     }
 
     broadcastToOthers<K extends keyof MessageMap>(excludeId: string, type: K, payload: MessageMap[K]) {
+        // 向其他玩家广播
         for (const p of this.players.values()) {
             if (p.userId !== excludeId) {
                 send(p.ctx, type, payload as MessageMap[K])
             }
         }
+        // 向其他观战者广播
+        for (const s of this.spectators.values()) {
+            if (s.userId !== excludeId) {
+                send(s.ctx, type, payload as MessageMap[K])
+            }
+        }
+    }
+
+    broadcastGameMessage(
+        type: "game.state" | "game.resolve",
+        buildPlayerPayload: (player: PlayerState) => any,
+        buildSpectatorPayload: () => any
+    ) {
+        const players = this.getPlayers()
+        const spectators = this.getSpectators()
+
+        // 向玩家发送加密后的信息
+        players.forEach((player) => {
+            const payload = buildPlayerPayload(player)
+            send(player.ctx, type, payload)
+        })
+
+        // 向观战者发送未加密的完整信息
+        if (spectators.length > 0) {
+            const payload = buildSpectatorPayload()
+            spectators.forEach((spectator) => {
+                send(spectator.ctx, type, payload)
+            })
+        }
     }
 
     allReady(): boolean {
+        if (this.players.size === 0) return false
         return Array.from(this.players.values()).every((p) => p.ready)
     }
 
     startGame() {
         if (this.status !== "waiting") return
+
+        const players = this.getPlayers()
+        if (players.length < 2) {
+            return
+        }
         if (!this.allReady()) return
 
         this.status = "playing"
 
-        for (const player of this.players.values()) {
+        for (const player of players) {
             player.ready = false
         }
 
@@ -130,6 +204,12 @@ export class RoomManager {
             player.ctx.userState = "lobby"
         })
 
+        // 清理所有观战者的房间状态
+        room.spectators.forEach((spectator) => {
+            spectator.ctx.roomId = undefined
+            spectator.ctx.userState = "lobby"
+        })
+
         this.rooms.delete(roomId)
         logger.room("Room deleted", { roomId, totalRooms: this.rooms.size })
     }
@@ -138,7 +218,7 @@ export class RoomManager {
         const room = this.rooms.get(roomId)
         if (!room) throw new Error("ROOM_NOT_FOUND")
 
-        // 检查是否是该玩家的重连（玩家仍在房间列表中但websocket已断开）
+        // 检查是否是玩家的重连（只有玩家支持重连，观战者不支持）
         const existingPlayer = room.getPlayer(user.userId)
         const isReconnect = existingPlayer !== undefined
 
@@ -160,25 +240,19 @@ export class RoomManager {
 
             // 重置ping/pong状态，避免立即被判定为离线
             ctx.lastPongTime = Date.now()
-            ctx.latency = undefined
+            ctx.latency = 0
 
             logger.room("Player reconnected to room", {
                 roomId,
                 userId: user.userId,
-                gameStatus: room.status
+                gameStatus: room.status,
+                role: existingPlayer.role
             })
 
             sendSystemMessage(room, `${user.nickname} 重新连接`)
         } else {
-            // 新加入逻辑
-            if (room.players.size >= room.maxPlayers) {
-                throw new Error("ROOM_FULL")
-            }
-
-            // 先设置 ctx.userId，因为 addPlayer 需要它
+            // 先设置 ctx.userId 和用户信息
             ctx.userId = user.userId
-
-            // 设置用户信息
             ctx.user = {
                 userId: user.userId,
                 nickname: user.nickname,
@@ -187,17 +261,47 @@ export class RoomManager {
                 color: user.color,
             }
 
-            // 再添加玩家到房间
-            room.addPlayer(ctx)
+            // 检查是否应该以观战者身份加入
+            const isGamePlaying = room.status === "playing"
+            const isPlayerFull = room.players.size >= room.maxPlayers
 
-            logger.room("Player joined room", {
-                roomId,
-                userId: ctx.userId,
-                playerCount: room.players.size
-            })
+            if (isGamePlaying || isPlayerFull) {
+                // 游戏进行中或玩家人数已满，以观战者身份加入
+                room.addSpectator(ctx)
 
-            const nickname = ctx.user?.nickname ?? ctx.userId
-            sendSystemMessage(room, `${nickname} 加入了房间`)
+                logger.room("User joined as spectator", {
+                    roomId,
+                    userId: ctx.userId,
+                    reason: isGamePlaying ? "game_in_progress" : "room_full",
+                    playerCount: room.players.size,
+                    spectatorCount: room.spectators.size
+                })
+
+                if (isGamePlaying) {
+                    send(ctx, "server.toast", {
+                        type: "info",
+                        message: "游戏进行中，正在观战",
+                    })
+                    sendSystemMessage(room, `${user.nickname} 加入观战`)
+                } else {
+                    send(ctx, "server.toast", {
+                        type: "info",
+                        message: `玩家已满(${room.players.size}/${room.maxPlayers})，加入观战`,
+                    })
+                    sendSystemMessage(room, `${user.nickname} 加入观战`)
+                }
+            } else {
+                // 玩家人数未满且游戏未开始，以玩家身份加入
+                room.addPlayer(ctx)
+
+                logger.room("User joined room as player", {
+                    roomId,
+                    userId: ctx.userId,
+                    playerCount: room.players.size
+                })
+
+                sendSystemMessage(room, `${user.nickname} 加入了房间`)
+            }
         }
 
         // 广播房间更新
@@ -216,15 +320,30 @@ export class RoomManager {
 
         const nickname = ctx.user?.nickname ?? ctx.userId
 
-        room.removePlayer(ctx.userId)
+        // 尝试从玩家列表移除
+        const isPlayer = room.players.has(ctx.userId)
+        if (isPlayer) {
+            room.removePlayer(ctx.userId)
+            sendSystemMessage(room, `${nickname} 离开房间`)
+        } else {
+            // 尝试从观战者列表移除
+            room.removeSpectator(ctx.userId)
+            sendSystemMessage(room, `${nickname} 退出观战`)
+        }
+
         ctx.roomId = undefined
         ctx.userState = "lobby"
 
-        logger.room("Player left room", { roomId: room.roomId, userId: ctx.userId, playerCount: room.players.size })
+        logger.room("User left room", {
+            roomId: room.roomId,
+            userId: ctx.userId,
+            role: isPlayer ? "player" : "spectator",
+            playerCount: room.players.size,
+            spectatorCount: room.spectators.size
+        })
 
-        sendSystemMessage(room, `${nickname} 退出了房间`)
-
-        if (room.players.size === 0) {
+        // 如果房间没有任何人，销毁房间
+        if (room.players.size === 0 && room.spectators.size === 0) {
             this.rooms.delete(room.roomId)
             logger.room("Room deleted (empty)", { roomId: room.roomId, totalRooms: this.rooms.size })
             return

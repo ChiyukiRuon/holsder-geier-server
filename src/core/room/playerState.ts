@@ -1,7 +1,9 @@
 import {WsContext} from "../../ws/wsContext";
+import {RoomRole} from "../../types/ws/room";
 
 export class PlayerState {
     ctx: WsContext
+    role: RoomRole = "player"
 
     ready = false
 
@@ -30,6 +32,7 @@ export class PlayerState {
                 background: this.ctx.user?.background ?? "",
                 color: this.ctx.user?.color ?? "",
             },
+            role: this.role,
             ready: this.ready,
             card: this.handCards,
             point: {

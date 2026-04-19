@@ -1,6 +1,7 @@
 import {UserInfo} from "./user";
 
 export type RoomStatus = 'waiting' | 'playing' | 'finished';
+export type RoomRole = 'player' | 'spectator';
 
 export interface RoomCreatePayload {
     roomId: string
@@ -19,9 +20,14 @@ export interface RoomListPayload {
     rooms: RoomInfo[]
 }
 
+export interface RoomRolePayload {
+    role: RoomRole
+}
+
 export interface RoomInfo {
     roomId: string
     players: PlayerInfo[]
+    spectators: PlayerInfo[]
     status: RoomStatus
     maxPlayers: number
 }
@@ -32,6 +38,7 @@ export interface RoomUpdatePayload {
 
 export interface PlayerInfo {
     user: UserInfo;
+    role: RoomRole;
     card: number[];
     point: {
         count: number;

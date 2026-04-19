@@ -2,7 +2,6 @@ import { Room } from "../room/roomManager"
 import { PlayerState } from "../room/playerState"
 import { logger } from "../../utils/logger"
 import { sendSystemMessage } from "../../ws/handlers/chat"
-import { send } from "../../ws/wsRouter"
 
 export type GameStage =
     | "idle"
@@ -45,6 +44,7 @@ export class GameEngine {
 
     stage: GameStage = "idle"
     currentRound = 0
+    isRoundTie = false
 
     pointDeck: PointCard[] = []
     currentPointCard: PointCard | null = null
@@ -56,7 +56,7 @@ export class GameEngine {
 
     constructor(room: Room) {
         this.room = room
-        this.players = Array.from(room.players.values())
+        this.players = room.getPlayers()
         this.playerOrder = [...this.players]
     }
 
@@ -74,6 +74,7 @@ export class GameEngine {
 
         this.room.broadcast("game.start", {
             players: this.players.map(p => p.toPublicInfo()),
+            spectators: this.room.getSpectators().map(s => s.toPublicInfo()),
             state: this.getState(),
         })
 
@@ -119,24 +120,45 @@ export class GameEngine {
             return
         }
 
+        if (this.currentPointCard !== null && this.isRoundTie) {
+            this.carriedOverCards.push(this.currentPointCard!)
+        } else {
+            this.carriedOverCards = []
+        }
+
         this.currentPointCard = scoreCard
 
-        this.room.broadcast("game.state", {
-            players: this.players.map(p => p.toPublicInfo()),
-            state: this.getState(),
-        })
+        // 向玩家和观战者发送游戏状态
+        this.room.broadcastGameMessage(
+            "game.state",
+            (player) => ({
+                players: this.buildPlayerListForPlayer(player.userId),
+                spectators: this.buildSpectatorList(),
+                state: this.buildStateForPlayer(player.userId),
+            }),
+            () => ({
+                players: this.buildPlayerListForSpectator(),
+                spectators: this.buildSpectatorList(),
+                state: this.buildStateForSpectator(),
+            })
+        )
 
         setTimeout(() => {
             this.stage = "play"
 
-            this.players.forEach((player) => {
-                const playerList = this.buildPlayerListForPlayer(player.userId)
-
-                send(player.ctx, "game.state", {
-                    players: playerList,
+            this.room.broadcastGameMessage(
+                "game.state",
+                (player) => ({
+                    players: this.buildPlayerListForPlayer(player.userId),
+                    spectators: this.buildSpectatorList(),
                     state: this.buildStateForPlayer(player.userId),
+                }),
+                () => ({
+                    players: this.buildPlayerListForSpectator(),
+                    spectators: this.buildSpectatorList(),
+                    state: this.buildStateForSpectator(),
                 })
-            })
+            )
         }, 500)
     }
 
@@ -207,10 +229,9 @@ export class GameEngine {
                     this.currentPointCard!
                 )
             }
-            this.carriedOverCards = []
+            this.isRoundTie = false
         } else {
-            this.carriedOverCards.push(this.currentPointCard!)
-            this.currentPointCard = null
+            this.isRoundTie = true
         }
 
         const roundResult: RoundResult = {
@@ -225,16 +246,21 @@ export class GameEngine {
             ? this.players.find(p => p.userId === winnerId)?.toPublicInfo() ?? null
             : null
 
-        this.players.forEach((player) => {
-            const playerList = this.buildPlayerListForPlayer(player.userId)
-            const gameState = this.buildStateForPlayer(player.userId)
-
-            send(player.ctx, "game.resolve", {
-                players: playerList,
-                state: gameState,
+        this.room.broadcastGameMessage(
+            "game.resolve",
+            (player) => ({
+                players: this.buildPlayerListForPlayer(player.userId),
+                spectators: this.buildSpectatorList(),
+                state: this.buildStateForPlayer(player.userId),
+                roundWinner,
+            }),
+            () => ({
+                players: this.buildPlayerListForSpectator(),
+                spectators: this.buildSpectatorList(),
+                state: this.buildStateForSpectator(),
                 roundWinner,
             })
-        })
+        )
 
         setTimeout(() => {
             this.nextRound()
@@ -247,19 +273,26 @@ export class GameEngine {
     ): { winnerId: string | null } {
         if (playedCards.length === 0) return { winnerId: null }
 
-        const sorted = [...playedCards].sort((a, b) => {
+        // 统计每张牌的出现次数
+        const cardCountMap = new Map<number, number>()
+        playedCards.forEach(({ card }) => {
+            cardCountMap.set(card, (cardCountMap.get(card) || 0) + 1)
+        })
+
+        // 过滤出只出现一次的牌（不重复的牌）
+        const uniqueCards = playedCards.filter(({ card }) => cardCountMap.get(card) === 1)
+
+        // 如果没有不重复的牌，无人获胜
+        if (uniqueCards.length === 0) {
+            return { winnerId: null }
+        }
+
+        // 根据分值牌的正负决定排序方式
+        const sorted = uniqueCards.sort((a, b) => {
             return scoreCard > 0 ? b.card - a.card : a.card - b.card
         })
 
-        const topCard = sorted[0].card
-        const tied = sorted.filter(p => p.card === topCard)
-
-        if (tied.length === sorted.length) return { winnerId: null }
-        if (tied.length > 1) {
-            const next = sorted.find(p => p.card !== topCard)
-            return { winnerId: next?.playerId ?? null }
-        }
-
+        // 返回第一个（最大值或最小值）的玩家ID
         return { winnerId: sorted[0].playerId }
     }
 
@@ -269,19 +302,34 @@ export class GameEngine {
         const rankings = [...this.players]
             .map((p) => ({
                 playerId: p.userId,
-                total: p.getTotalPoint(),
+                totalPoint: p.getTotalPoint(),
             }))
-            .sort((a, b) => b.total - a.total)
+            .sort((a, b) => b.totalPoint - a.totalPoint)
 
-        const winnerId = rankings[0]?.playerId
-        const isTie = rankings.length > 1 && rankings[0].total === rankings[1].total
+        let winnerId: string | undefined = undefined
+        let isTie = false
+
+        if (rankings.length > 0) {
+            winnerId = rankings[0].playerId
+
+            for (let i = 1; i < rankings.length; i++) {
+                if (rankings[i].totalPoint !== rankings[0].totalPoint) {
+                    break
+                }
+
+                if (i === rankings.length - 1) {
+                    isTie = true
+                    winnerId = undefined
+                }
+            }
+        }
 
         logger.game("Game ended", {
             roomId: this.room.roomId,
             winnerId: isTie ? null : winnerId,
             isTie,
             rankings,
-            finalScores: rankings.map(r => ({ playerId: r.playerId, total: r.total }))
+            finalScores: rankings.map(r => ({ playerId: r.playerId, total: r.totalPoint }))
         })
 
         this.room.status = "waiting"
@@ -303,6 +351,7 @@ export class GameEngine {
                 totalPoint: p.getTotalPoint(),
             })),
             players: this.players.map((p) => p.toPublicInfo()),
+            spectators: this.buildSpectatorList(),
             state: this.getState(),
         })
 
@@ -413,16 +462,57 @@ export class GameEngine {
     }
 
     sendStateToAll() {
-        this.players.forEach((player) => {
-            const playerList = this.buildPlayerListForPlayer(player.userId)
-
-            console.log("Sending state to player", player.userId)
-            console.log("Player list:", playerList)
-            console.log("State:", this.buildStateForPlayer(player.userId))
-            send(player.ctx, "game.state", {
-                players: playerList,
+        this.room.broadcastGameMessage(
+            "game.state",
+            (player) => ({
+                players: this.buildPlayerListForPlayer(player.userId),
+                spectators: this.buildSpectatorList(),
                 state: this.buildStateForPlayer(player.userId),
+            }),
+            () => ({
+                players: this.buildPlayerListForSpectator(),
+                spectators: this.buildSpectatorList(),
+                state: this.buildStateForSpectator(),
             })
+        )
+    }
+
+    buildPlayerListForSpectator() {
+        return this.players.map((p) => {
+            const info = p.toPublicInfo()
+            const currentCard = this.playedCards.get(p.userId)
+            const lastCard = this.lastPlayedCards.get(p.userId)
+
+            return {
+                ...info,
+                currentPlayerCard: currentCard ?? null,
+                lastPlayerCard: lastCard ?? null,
+            }
         })
+    }
+
+    buildSpectatorList() {
+        const spectators = this.room.getSpectators()
+        return spectators.map((s) => s.toPublicInfo())
+    }
+
+    buildStateForSpectator() {
+        return {
+            stage: this.stage,
+            currentRound: this.currentRound,
+            currentPointCard: this.currentPointCard,
+            carriedOverCards: this.carriedOverCards,
+
+            playedCards: Array.from(this.playedCards.entries()).map(
+                ([playerId, card]) => ({ playerId, card })
+            ),
+
+            lastPlayedCards: Array.from(this.lastPlayedCards.entries()).map(
+                ([playerId, card]) => ({
+                    playerId,
+                    card,
+                })
+            ),
+        }
     }
 }

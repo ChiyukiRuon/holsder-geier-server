@@ -17,6 +17,7 @@ export interface GameState {
 
 export interface GameStartPayload {
     players: PlayerInfo[]
+    spectators: PlayerInfo[]
     state: GameState
 }
 
@@ -24,7 +25,7 @@ export interface GameEndPayload {
     winnerId?: string
     rankings: Array<{
         playerId: string
-        total: number
+        totalPoint: number
     }>
     playerPointDetails: Array<{
         playerId: string
@@ -32,16 +33,19 @@ export interface GameEndPayload {
         totalPoint: number
     }>
     players: PlayerInfo[]
+    spectators: PlayerInfo[]
     state: GameState
 }
 
 export interface GameStatePayload {
     players: PlayerInfo[]
+    spectators: PlayerInfo[]
     state: GameState
 }
 
 export interface GameResolvePayload {
     players: PlayerInfo[]
+    spectators: PlayerInfo[]
     state: GameState
     roundWinner: PlayerInfo | null
 }

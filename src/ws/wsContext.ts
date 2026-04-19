@@ -10,6 +10,7 @@ export interface WsContext {
 
     userReady?: boolean
     userState?: "lobby" | "room"
+    userRole?: "player" | "spectator"
 
     card?: number[] // 手牌列表
     point?: {

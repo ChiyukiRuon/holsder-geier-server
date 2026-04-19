@@ -19,6 +19,7 @@ export interface MessageMap {
     "room.leave": Room.RoomLeavePayload
     "room.list": Room.RoomListPayload
     "room.update": Room.RoomUpdatePayload
+    "room.role": Room.RoomRolePayload
 
     // game
     "game.ready": Game.GameReadyPayload

@@ -21,6 +21,8 @@ export const RoomError = {
     ROOM_ALREADY_EXISTS: "ROOM_ALREADY_EXISTS", // 房间已存在
     ROOM_FULL: "ROOM_FULL",                   // 房间已满
     JOIN_FAILED: "JOIN_FAILED",               // 加入房间失败
+    INVALID_ROLE: "INVALID_ROLE",             // 无效的角色
+    GAME_IN_PROGRESS: "GAME_IN_PROGRESS",     // 游戏进行中，无法切换角色
 } as const
 
 // 游戏相关错误码
