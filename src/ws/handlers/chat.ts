@@ -3,7 +3,7 @@ import { send } from "../wsRouter"
 import { roomManager } from "../../core/room/roomManager"
 import { ChatReceivePayload } from "../../types/ws/chat"
 import { logger } from "../../utils/logger"
-import { ChatError } from "../../types/ws/errorCode"
+import { ChatError, CommonError } from "../../types/ws/errorCode"
 import { Room } from "../../core/room/roomManager"
 
 export function sendSystemMessage(room: Room, message: string) {
@@ -29,6 +29,26 @@ export const chatHandlers: HandlerMap = {
             return
         }
 
+        // 检查是否在房间中
+        if (!ctx.roomId) {
+            send(ctx, "server.error", {
+                code: CommonError.NOT_IN_ROOM,
+                message: "You are not in any room",
+                requestId: msg.requestId,
+            })
+            return
+        }
+
+        const room = roomManager.getRoom(ctx.roomId)
+        if (!room) {
+            send(ctx, "server.error", {
+                code: CommonError.NOT_IN_ROOM,
+                message: "Room not found",
+                requestId: msg.requestId,
+            })
+            return
+        }
+
         const payload: ChatReceivePayload = {
             user: ctx.user,
             type: 'user',
@@ -36,17 +56,9 @@ export const chatHandlers: HandlerMap = {
             timestamp: Date.now(),
         }
 
-        if (ctx.roomId) {
-            const room = roomManager.getRoom(ctx.roomId)
-            if (room) {
-                room.addChatMessage(payload)
-                room.broadcast("chat.receive", payload)
-                logger.chat("Room message sent", { roomId: ctx.roomId, userId: ctx.userId, messageLength: message.length })
-            }
-        } else {
-            send(ctx, "chat.receive", payload)
-            logger.chat("Global message sent", { userId: ctx.userId, messageLength: message.length })
-        }
+        room.addChatMessage(payload)
+        room.broadcast("chat.receive", payload)
+        logger.chat("Room message sent", { roomId: ctx.roomId, userId: ctx.userId, messageLength: message.length })
 
         send(ctx, "server.ack", { requestId: msg.requestId! })
     },

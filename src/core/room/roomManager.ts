@@ -93,24 +93,28 @@ export class Room {
     broadcast<K extends keyof MessageMap>(type: K, payload: MessageMap[K]) {
         // 向所有玩家广播
         for (const p of this.players.values()) {
-            send(p.ctx, type, payload as MessageMap[K])
+            if (p.ctx.roomId === this.roomId) {
+                send(p.ctx, type, payload as MessageMap[K])
+            }
         }
         // 向所有观战者广播
         for (const s of this.spectators.values()) {
-            send(s.ctx, type, payload as MessageMap[K])
+            if (s.ctx.roomId === this.roomId) {
+                send(s.ctx, type, payload as MessageMap[K])
+            }
         }
     }
 
     broadcastToOthers<K extends keyof MessageMap>(excludeId: string, type: K, payload: MessageMap[K]) {
         // 向其他玩家广播
         for (const p of this.players.values()) {
-            if (p.userId !== excludeId) {
+            if (p.userId !== excludeId && p.ctx.roomId === this.roomId) {
                 send(p.ctx, type, payload as MessageMap[K])
             }
         }
         // 向其他观战者广播
         for (const s of this.spectators.values()) {
-            if (s.userId !== excludeId) {
+            if (s.userId !== excludeId && s.ctx.roomId === this.roomId) {
                 send(s.ctx, type, payload as MessageMap[K])
             }
         }
@@ -126,15 +130,19 @@ export class Room {
 
         // 向玩家发送加密后的信息
         players.forEach((player) => {
-            const payload = buildPlayerPayload(player)
-            send(player.ctx, type, payload)
+            if (player.ctx.roomId === this.roomId) {
+                const payload = buildPlayerPayload(player)
+                send(player.ctx, type, payload)
+            }
         })
 
         // 向观战者发送未加密的完整信息
         if (spectators.length > 0) {
             const payload = buildSpectatorPayload()
             spectators.forEach((spectator) => {
-                send(spectator.ctx, type, payload)
+                if (spectator.ctx.roomId === this.roomId) {
+                    send(spectator.ctx, type, payload)
+                }
             })
         }
     }
@@ -319,12 +327,24 @@ export class RoomManager {
         if (!room) return
 
         const nickname = ctx.user?.nickname ?? ctx.userId
+        const isGamePlaying = room.status === "playing"
 
         // 尝试从玩家列表移除
         const isPlayer = room.players.has(ctx.userId)
         if (isPlayer) {
-            room.removePlayer(ctx.userId)
-            sendSystemMessage(room, `${nickname} 离开房间`)
+            // 游戏进行中：不从 players 移除，保留重连机制
+            if (isGamePlaying) {
+                logger.room("Player left during game (kept for reconnection)", {
+                    roomId: room.roomId,
+                    userId: ctx.userId
+                })
+
+                sendSystemMessage(room, `${nickname} 断开连接`)
+            } else {
+                // 游戏未开始：直接移除
+                room.removePlayer(ctx.userId)
+                sendSystemMessage(room, `${nickname} 离开房间`)
+            }
         } else {
             // 尝试从观战者列表移除
             room.removeSpectator(ctx.userId)
@@ -338,6 +358,7 @@ export class RoomManager {
             roomId: room.roomId,
             userId: ctx.userId,
             role: isPlayer ? "player" : "spectator",
+            isGamePlaying,
             playerCount: room.players.size,
             spectatorCount: room.spectators.size
         })
