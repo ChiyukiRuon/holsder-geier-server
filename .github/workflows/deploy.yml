@@ -1,4 +1,4 @@
-name: Build And Upload Node Dist
+name: Deploy
 
 on:
   push:
@@ -12,7 +12,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # package.json
+      # 读取包信息
       - name: Read package info
         id: pkg
         run: |
@@ -21,18 +21,18 @@ jobs:
           echo "name=$NAME" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      # 获取线上版本
+      # 获取线上版本（接口反映的是当前正在跑的进程，所以重启失败时下次运行能自动补救）
       - name: Fetch remote version
         id: remote
         run: |
           RESPONSE=$(curl -s --max-time 20 https://${{ secrets.API_URL }}/info || echo "fail")
-          
+
           if [ "$RESPONSE" = "fail" ]; then
             REMOTE_V="none"
           else
             REMOTE_V=$(echo "$RESPONSE" | jq -r '.data.version // "none"' 2>/dev/null || echo "none")
           fi
-          
+
           echo "version=$REMOTE_V" >> $GITHUB_OUTPUT
 
       # 比较版本
@@ -41,10 +41,10 @@ jobs:
         run: |
           LOCAL="${{ steps.pkg.outputs.version }}"
           REMOTE="${{ steps.remote.outputs.version }}"
-          
+
           echo "Local Version:  $LOCAL"
           echo "Remote Version: $REMOTE"
-          
+
           if [ "$LOCAL" = "$REMOTE" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
             echo "Same version. Skip build."
@@ -54,19 +54,18 @@ jobs:
           fi
 
       # Node 环境
+      # 与服务器运行时保持一致：服务器上跑的是 Node 24
       - name: Setup Node
         if: steps.compare.outputs.skip == 'false'
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: 'npm'
 
-      # 安装依赖
       - name: Install dependencies
         if: steps.compare.outputs.skip == 'false'
         run: npm ci
 
-      # 构建
       - name: Build TypeScript
         if: steps.compare.outputs.skip == 'false'
         run: npm run build
@@ -79,7 +78,7 @@ jobs:
             exit 1
           fi
 
-      # 创建远程目录（并清空旧文件）
+      # 准备远程目录
       - name: Prepare remote directory
         if: steps.compare.outputs.skip == 'false'
         uses: appleboy/ssh-action@v1.0.3
@@ -88,10 +87,15 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            mkdir -p "/www/wwwroot/${{ steps.pkg.outputs.name }}"
-            rm -rf "/www/wwwroot/${{ steps.pkg.outputs.name }}/*"
+            set -e
+            DIR="/www/wwwroot/${{ steps.pkg.outputs.name }}"
 
-      # 上传
+            mkdir -p "$DIR"
+            rm -rf "$DIR/dist"
+
+            echo "已清理 $DIR/dist"
+
+      # 上传（直接写进目标目录，属主天然就是 www）
       - name: Upload project files to server
         if: steps.compare.outputs.skip == 'false'
         uses: appleboy/scp-action@v0.1.7
@@ -103,13 +107,42 @@ jobs:
           target: "/www/wwwroot/${{ steps.pkg.outputs.name }}"
           strip_components: 0
 
-      # 记录是否 build
-      - name: Export build flag
-        run: |
-          echo "${{ steps.compare.outputs.skip == 'false' }}" > built.txt
-
-      - name: Upload build flag
-        uses: actions/upload-artifact@v4
+      # 用 pm2 重启（进程不存在时从 ecosystem 文件启动）
+      - name: Restart Service (pm2)
+        if: steps.compare.outputs.skip == 'false'
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          name: build-flag
-          path: built.txt
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            set -e
+            NAME=${{ steps.pkg.outputs.name }}
+
+            if pm2 describe "$NAME" >/dev/null 2>&1; then
+              echo "[pm2] 进程已存在，执行 restart"
+              pm2 restart "$NAME"
+            else
+              echo "[pm2] 进程不存在，从 ecosystem.config.js 启动"
+              cd /www/wwwroot && pm2 start ecosystem.config.js --only "$NAME"
+            fi
+
+            # 固化进程列表，保证服务器重启后能自动恢复
+            pm2 save
+
+            echo "--- 当前 pm2 进程列表:"
+            pm2 list
+
+      # 重启后回读线上版本，确认真的生效了
+      - name: Verify deployed version
+        if: steps.compare.outputs.skip == 'false'
+        run: |
+          sleep 3
+          LIVE=$(curl -s --max-time 20 https://${{ secrets.API_URL }}/info | jq -r '.data.version // "unknown"')
+          echo "期望版本: ${{ steps.pkg.outputs.version }}"
+          echo "线上版本: $LIVE"
+          if [ "$LIVE" != "${{ steps.pkg.outputs.version }}" ]; then
+            echo "::error::线上版本与本次部署的版本不一致，重启可能没生效"
+            exit 1
+          fi
+          echo "部署成功"
